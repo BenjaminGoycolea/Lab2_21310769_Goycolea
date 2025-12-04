@@ -1,19 +1,41 @@
-
+% Exportar predicados
 :- module(libro_21310769_GoycoleaContardo, [
     crearLibro/4,
+    getLibroId/2,
+    getLibroTitulo/2,
+    getLibroAutor/2,
+
 ]).
 
+%=============== Constructor ===================
+
 % RF03: crearLibro/4
-% Descripción: Crea un libro con id, título y autor. Título y autor se convierten en minúsculas al crear
-% Dominio: id (int) X titulo (string) X autor (string) X libro (Libro)
-% Uso: crearLibro(+Id, +Titulo, +Autor, -Libro)
+% Descripción: Crea un libro con id, título y autor. Título y autor se convierten en minúsculas al crear.
+% Parametros: crearLibro(+Id, +Titulo, +Autor, -Libro)
+% Algoritmo: fuerza bruta
 crearLibro(Id, Titulo, Autor, Libro) :-
-    % Hacer verificaciones
+    % Verificaciones
     integer(Id),
     (string(Titulo) ; atom(Titulo)),
     (string(Autor) ; atom(Autor)),
-    % Convertir a minuscula
+    % Convertir titulo y autor a minusculas
     downcase_atom(Titulo, TituloLower),
     downcase_atom(Autor, AutorLower),
-    % Crear libro: [Id, Titulo, Autor, Disponible=true]
+    % Libro = [Id, Titulo, Autor, Disponible=true]
     Libro = [Id, TituloLower, AutorLower, true].
+
+%=============== Selectores ===================
+
+% RF10: getLibroId/2
+% Descripción: Obtiene el ID de un libro.
+% Parametros: getLibroId(+Libro, -Id)
+% Algoritmo: fuerza bruta
+getLibroId([Id, _, _, _], Id).
+
+% getLibro{Elemento}/2
+% Descripción: Obtiene el {Elemento} del libro
+% Parametros: getLibro{Elemento}(+Libro, -{Elemento})
+% Algoritmo: fuerza bruta
+getLibroTitulo([_, Titulo, _, _], Titulo).
+getLibroAutor([_, _, Autor, _], Autor).
+isLibroDisponible([_, _, _, true]).
