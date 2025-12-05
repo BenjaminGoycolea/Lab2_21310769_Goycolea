@@ -5,6 +5,9 @@
     registrarUsuario/3,
     obtenerUsuario/3,
     buscarLibro/4,
+    getFecha/2,
+    isLibroDisponible/2,
+    obtenerDeuda/2,
     getBibliotecaTasaMulta/2,
     getBibliotecaLibros/2,
     getBibliotecaUsuarios/2,
@@ -56,6 +59,11 @@ getBibliotecaTasaMulta([_, _, _, _, _, TasaMulta, _, _, _], TasaMulta).
 getBibliotecaLimiteDeuda([_, _, _, _, _, _, LimiteDeuda, _, _], LimiteDeuda).
 getBibliotecaDiasRetraso([_, _, _, _, _, _, _, DiasRetraso, _], DiasRetraso).
 
+% RF11: getFecha/2
+% Descripción: Obtiene la fecha actual del sistema desde la biblioteca.
+% Parametros: getFecha(+Biblioteca, -Fecha)
+% Algoritmo: fuerza bruta
+getFecha([_, _, _, _, _, _, _, _, Fecha], Fecha).
 
 %=============== Modificadores ===================
 
@@ -152,6 +160,14 @@ buscarLibro(_, _, _, false) :-
     !.
 
 %=============== Modificadores ===================
+% RF12: isLibroDisponible/2
+% Descripción: Verifica si un libro está disponible (no prestado). Retorna false si el libro no existe o está prestado.
+% Parametros: isLibroDisponible(+BibliotecaIn, +IdLibro)
+% Algoritmo: fuerza bruta
+isLibroDisponible(Biblioteca, IdLibro) :-
+    getBibliotecaLibros(Biblioteca, Libros),
+    buscarLibroPorId(Libros, IdLibro, Libro),
+    isLibroDisponible(Libro).
 
 % Marcar libro como no disponible
 marcarLibroNoDisponible(BibliotecaIn, IdLibro, BibliotecaOut) :-
@@ -177,8 +193,34 @@ modificarLibrosUsuario([Usuario|Resto], IdUsuario, IdLibro, Operacion, [UsuarioM
     getUsuarioId(Usuario, IdUsuario), !,
     (Operacion = agregar ->
         agregarLibroUsuario(Usuario, IdLibro, UsuarioModificado)
+% RF14: obtenerDeuda/2
+% Descripción: Retorna la deuda acumulada del usuario.
+% Parametros: obtenerDeuda(+Usuario, -Deuda)
+% Algoritmo: fuerza bruta
+obtenerDeuda(Usuario, Deuda) :-
+    getUsuarioDeuda(Usuario, Deuda).
+
+%=============== Funciones fecha ===================
+
+% avanzarFecha/2
+% Descripción: Avanza la fecha en un dia
+% Parametros: avanzarFecha(+FechaActual, -FechaSiguiente)
+% Algoritmo: fuerza bruta
+avanzarFecha(FechaActual, FechaSiguiente) :-
+    extraerDatosFecha(FechaActual, Dia, Mes),
+    (Dia =:= 30 ->
+        % Si el dia actual es 30
+        % Cambiar de mes, nuevo dia es 1
+        NuevoDia = 1,
+        NuevoMes is Mes + 1
     ;
         removerLibroUsuario(Usuario, IdLibro, UsuarioModificado)
     ).
 modificarLibrosUsuario([Usuario|Resto], IdUsuario, IdLibro, Operacion, [Usuario|NuevoResto]) :-
     modificarLibrosUsuario(Resto, IdUsuario, IdLibro, Operacion, NuevoResto).
+        % Si el dia actual no es 30
+        % Es el mismo mes, pasar al dia siguiente
+        NuevoDia is Dia + 1,
+        NuevoMes = Mes
+    ),
+    formatearFecha(NuevoDia, NuevoMes, FechaSiguiente).
