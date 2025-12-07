@@ -16,6 +16,16 @@
     getBibliotecaDiasMax/2,
     getBibliotecaLimiteDeuda/2,
     getBibliotecaDiasRetraso/2,
+    tomarPrestamo/6,
+    devolverLibro/5,
+    debeSuspenderse/3,
+    suspenderUsuario/3,
+    renovarPrestamo/5,
+    pagarDeuda/4,
+    historialPrestamosUsuario/3,
+    historialPrestamosSistema/2,
+    procesarDia/2,
+    fecha/4
 ]).
 
 % Importar los otros archivos
@@ -159,7 +169,6 @@ buscarLibro(Biblioteca, "autor", Valor, Libro) :-
 buscarLibro(_, _, _, false) :- 
     !.
 
-%=============== Modificadores ===================
 % RF12: isLibroDisponible/2
 % Descripción: Verifica si un libro está disponible (no prestado). Retorna false si el libro no existe o está prestado.
 % Parametros: isLibroDisponible(+BibliotecaIn, +IdLibro)
@@ -168,6 +177,99 @@ isLibroDisponible(Biblioteca, IdLibro) :-
     getBibliotecaLibros(Biblioteca, Libros),
     buscarLibroPorId(Libros, IdLibro, Libro),
     isLibroDisponible(Libro).
+
+% RF14: obtenerDeuda/2
+% Descripción: Retorna la deuda acumulada del usuario.
+% Parametros: obtenerDeuda(+Usuario, -Deuda)
+% Algoritmo: fuerza bruta
+obtenerDeuda(Usuario, Deuda) :-
+    getUsuarioDeuda(Usuario, Deuda).
+
+%=============== Funciones fecha ===================
+
+% avanzarFecha/2
+% Descripción: Avanza la fecha en un dia
+% Parametros: avanzarFecha(+FechaActual, -FechaSiguiente)
+% Algoritmo: fuerza bruta
+avanzarFecha(FechaActual, FechaSiguiente) :-
+    extraerDatosFecha(FechaActual, Dia, Mes),
+    (Dia =:= 30 ->
+        % Si el dia actual es 30
+        % Cambiar de mes, nuevo dia es 1
+        NuevoDia = 1,
+        NuevoMes is Mes + 1
+    ;
+        % Si el dia actual no es 30
+        % Es el mismo mes, pasar al dia siguiente
+        NuevoDia is Dia + 1,
+        NuevoMes = Mes
+    ),
+    formatearFecha(NuevoDia, NuevoMes, FechaSiguiente).
+
+%=============== Prestamos de la biblioteca ===================
+
+% RF18: tomarPrestamo/6
+% Descripción: Usuario toma libro prestado. Verifica: 1) libro disponible, 2) usuario no suspendido, 3) no excede límite de libros, 4) días solicitados no exceden máximo, 5) deuda no excede límite. Si alguna verificación falla retorna false.
+% Parametros: tomarPrestamo(+BibliotecaIn, +IdUsuario, +IdLibro, +Dias, +FechaActual, -BibliotecaOut)
+% Algoritmo: fuerza bruta
+tomarPrestamo(BibliotecaIn, IdUsuario, IdLibro, Dias, FechaActual, BibliotecaOut) :-
+    % 1. Verificar que libro este disponible
+    isLibroDisponible(BibliotecaIn, IdLibro),
+    
+    % 2. Obtener usuario y verificar que no esta suspendido
+    obtenerUsuario(BibliotecaIn, IdUsuario, Usuario),
+    Usuario \= false,
+    \+ isUsuarioSuspendido(Usuario),
+    
+    % 3. Verificar que no haya alcanzado el maximo de libros
+    getBibliotecaMaxLibros(BibliotecaIn, MaxLibros),
+    getUsuarioLibros(Usuario, LibrosUsuario),
+    length(LibrosUsuario, NumLibros),
+    NumLibros < MaxLibros,
+    
+    % 4. Verificar que los dias solicitados no exedan el maximo
+    getBibliotecaDiasMax(BibliotecaIn, DiasMax),
+    Dias =< DiasMax,
+    
+    % 5. Verificar que la deuda no exceda el limite
+    getBibliotecaLimiteDeuda(BibliotecaIn, LimiteDeuda),
+    getUsuarioDeuda(Usuario, Deuda),
+    Deuda =< LimiteDeuda,
+    
+    % Si se validaron todas las verificaciones, realizar el prestamo
+    realizarPrestamo(BibliotecaIn, IdUsuario, IdLibro, Dias, FechaActual, BibliotecaOut).
+
+% Auxiliar a tomar prestamo
+realizarPrestamo(BibliotecaIn, IdUsuario, IdLibro, Dias, FechaActual, BibliotecaOut) :-
+    % Generar ID
+    getBibliotecaPrestamos(BibliotecaIn, Prestamos),
+    generarIdPrestamo(Prestamos, NuevoIdPrestamo),
+    
+    % Crear el prestamo
+    crearPrestamo(NuevoIdPrestamo, IdUsuario, IdLibro, FechaActual, Dias, NuevoPrestamo),
+    
+    % Agregar el prestamo a la lista de prestamos
+    append(Prestamos, [NuevoPrestamo], NuevosPrestamos),
+    setBibliotecaPrestamos(BibliotecaIn, NuevosPrestamos, BibliotecaTemp1),
+    
+    % Marcar libro como no disponible
+    marcarLibroNoDisponible(BibliotecaTemp1, IdLibro, BibliotecaTemp2),
+    
+    % Agregar el libro a la lista de libros del usuario
+    agregarLibroAUsuario(BibliotecaTemp2, IdUsuario, IdLibro, BibliotecaOut).
+
+% Genera ID para el prestamo
+
+% Primer prestamo tiene ID 1
+generarIdPrestamo([], 1).
+
+% Prestamos siguientes se le suma 1 al mayor ID
+generarIdPrestamo(Prestamos, NuevoId) :-
+    maplist(getPrestamoId, Prestamos, Ids),
+    max_list(Ids, MaxId),
+    NuevoId is MaxId + 1.
+
+%=============== Modificadores ===================
 
 % Marcar libro como no disponible
 marcarLibroNoDisponible(BibliotecaIn, IdLibro, BibliotecaOut) :-
@@ -193,26 +295,6 @@ modificarLibrosUsuario([Usuario|Resto], IdUsuario, IdLibro, Operacion, [UsuarioM
     getUsuarioId(Usuario, IdUsuario), !,
     (Operacion = agregar ->
         agregarLibroUsuario(Usuario, IdLibro, UsuarioModificado)
-% RF14: obtenerDeuda/2
-% Descripción: Retorna la deuda acumulada del usuario.
-% Parametros: obtenerDeuda(+Usuario, -Deuda)
-% Algoritmo: fuerza bruta
-obtenerDeuda(Usuario, Deuda) :-
-    getUsuarioDeuda(Usuario, Deuda).
-
-%=============== Funciones fecha ===================
-
-% avanzarFecha/2
-% Descripción: Avanza la fecha en un dia
-% Parametros: avanzarFecha(+FechaActual, -FechaSiguiente)
-% Algoritmo: fuerza bruta
-avanzarFecha(FechaActual, FechaSiguiente) :-
-    extraerDatosFecha(FechaActual, Dia, Mes),
-    (Dia =:= 30 ->
-        % Si el dia actual es 30
-        % Cambiar de mes, nuevo dia es 1
-        NuevoDia = 1,
-        NuevoMes is Mes + 1
     ;
         removerLibroUsuario(Usuario, IdLibro, UsuarioModificado)
     ).
