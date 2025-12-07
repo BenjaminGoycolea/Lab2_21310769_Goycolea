@@ -306,3 +306,202 @@ modificarLibrosUsuario([Usuario|Resto], IdUsuario, IdLibro, Operacion, [Usuario|
         NuevoMes = Mes
     ),
     formatearFecha(NuevoDia, NuevoMes, FechaSiguiente).
+
+% RF19: devolverLibro/5
+% Descripción: Devuelve un libro y procesa multas. Calcula multa por retraso, suma la deuda del usuario, marca el libro disponible. Si la deuda total excede el límite, se suspende al usuario automáticamente. Usuario suspendido SÍ puede devolver.
+% Parametros: devolverLibro(+BibliotecaIn, +IdUsuario, +IdLibro, +FechaActual, -BibliotecaOut)
+% Algoritmo: fuerza bruta
+devolverLibro(BibliotecaIn, IdUsuario, IdLibro, FechaActual, BibliotecaOut) :-
+    % Buscar el prestamo del usuario correspondiente al ID del libro
+    getBibliotecaPrestamos(BibliotecaIn, Prestamos),
+    buscarPrestamoActivo(Prestamos, IdUsuario, IdLibro, Prestamo),
+    
+    % Calcular multa por retraso
+    getBibliotecaTasaMulta(BibliotecaIn, TasaMulta),
+    calcularMulta(Prestamo, FechaActual, TasaMulta, Multa),
+    
+    % Actualizar deuda del usuario
+    actualizarDeudaUsuario(BibliotecaIn, IdUsuario, Multa, BibliotecaTemp1),
+    
+    % Marcar prestamo como completado
+    marcarPrestamoCompletado(BibliotecaTemp1, Prestamo, BibliotecaTemp2),
+    
+    % Marcar libro como disponible
+    marcarLibroDisponible(BibliotecaTemp2, IdLibro, BibliotecaTemp3),
+    
+    % Remover libro de la lista del usuario
+    removerLibroDeUsuario(BibliotecaTemp3, IdUsuario, IdLibro, BibliotecaTemp4),
+    
+    % Verificar y suspender al usuario en caso de que se rompio alguna regla
+    (debeSuspenderse(BibliotecaTemp4, IdUsuario, FechaActual) ->
+        suspenderUsuario(BibliotecaTemp4, IdUsuario, BibliotecaOut)
+    ;
+        BibliotecaOut = BibliotecaTemp4
+    ).
+
+% RF20: debeSuspenderse/3
+% Descripción: Verifica si el usuario debe suspenderse automáticamente. Criterios: 1) deuda > límite máximo, O 2) tiene algún libro con retraso > días máximos permitidos. Si el usuario debe ser suspendido retorna true caso contrario false.
+% Parametros: debeSuspenderse(+Biblioteca, +IdUsuario, +FechaActual)
+% Algoritmo: fuerza bruta
+debeSuspenderse(Biblioteca, IdUsuario, FechaActual) :-
+    % 1. Deuda excede el limite
+    obtenerUsuario(Biblioteca, IdUsuario, Usuario),
+    Usuario \= false,
+    getBibliotecaLimiteDeuda(Biblioteca, LimiteDeuda),
+    getUsuarioDeuda(Usuario, Deuda),
+    (Deuda > LimiteDeuda ->
+        true
+    ;
+        % 2. Retraso en devolución del libro por sobre lo permitido
+        getBibliotecaDiasRetraso(Biblioteca, DiasMaxRetraso),
+        tieneRetrasoExcesivo(Biblioteca, IdUsuario, FechaActual, DiasMaxRetraso)
+    ).
+
+% RF21: suspenderUsuario/3
+% Descripción: Suspende al usuario manualmente cambiando su estado a true. Si el usuario se encuentra suspendido entonces el usuario se mantiene intacto en la biblioteca de salida.
+% Parametros: suspenderUsuario(+BibliotecaIn, +IdUsuario, -BibliotecaOut)
+% Algoritmo: fuerza bruta
+suspenderUsuario(BibliotecaIn, IdUsuario, BibliotecaOut) :-
+    getBibliotecaUsuarios(BibliotecaIn, Usuarios),
+    modificarSuspensionUsuario(Usuarios, IdUsuario, true, NuevosUsuarios),
+    setBibliotecaUsuarios(BibliotecaIn, NuevosUsuarios, BibliotecaOut).
+
+%=============== Auxiliares ===================
+
+% Buscar prestamo activo especifico
+
+% Se encontro el prestamo que se busca
+buscarPrestamoActivo([Prestamo|_], IdUsuario, IdLibro, Prestamo) :-
+    getPrestamoIdUsuario(Prestamo, IdUsuario),
+    getPrestamoIdLibro(Prestamo, IdLibro),
+    isPrestamoActivo(Prestamo), 
+    !.
+
+% Seguir buscando el prestamo que se busca en el resto de la lista
+buscarPrestamoActivo([_|Resto], IdUsuario, IdLibro, Prestamo) :-
+    buscarPrestamoActivo(Resto, IdUsuario, IdLibro, Prestamo).
+
+% Actualizar deuda del usuario sumandole la multa correspondiente
+
+% Actualizar deuda usuario
+actualizarDeudaUsuario(BibliotecaIn, IdUsuario, Multa, BibliotecaOut) :-
+    getBibliotecaUsuarios(BibliotecaIn, Usuarios),
+    actualizarDeudaEnLista(Usuarios, IdUsuario, Multa, NuevosUsuarios),
+    setBibliotecaUsuarios(BibliotecaIn, NuevosUsuarios, BibliotecaOut).
+
+% Actualizar deuda usuario en lista de usuarios
+actualizarDeudaEnLista([Usuario|Resto], IdUsuario, Multa, [UsuarioModificado|Resto]) :-
+    getUsuarioId(Usuario, IdUsuario), !,
+    getUsuarioDeuda(Usuario, DeudaActual),
+    NuevaDeuda is DeudaActual + Multa,
+    setUsuarioDeuda(Usuario, NuevaDeuda, UsuarioModificado).
+actualizarDeudaEnLista([Usuario|Resto], IdUsuario, Multa, [Usuario|NuevoResto]) :-
+    actualizarDeudaEnLista(Resto, IdUsuario, Multa, NuevoResto).
+
+% Marcar prestamo como completado
+marcarPrestamoCompletado(BibliotecaIn, Prestamo, BibliotecaOut) :-
+    getBibliotecaPrestamos(BibliotecaIn, Prestamos),
+    getPrestamoId(Prestamo, IdPrestamo),
+    marcarPrestamoInactivoEnLista(Prestamos, IdPrestamo, NuevosPrestamos),
+    setBibliotecaPrestamos(BibliotecaIn, NuevosPrestamos, BibliotecaOut).
+
+% Marcar prestamo como inactivo
+marcarPrestamoInactivoEnLista([Prestamo|Resto], IdPrestamo, [PrestamoModificado|Resto]) :-
+    getPrestamoId(Prestamo, IdPrestamo), !,
+    setPrestamoActivo(Prestamo, false, PrestamoModificado).
+marcarPrestamoInactivoEnLista([Prestamo|Resto], IdPrestamo, [Prestamo|NuevoResto]) :-
+    marcarPrestamoInactivoEnLista(Resto, IdPrestamo, NuevoResto).
+
+% Marcar un libro como disponible
+marcarLibroDisponible(BibliotecaIn, IdLibro, BibliotecaOut) :-
+    getBibliotecaLibros(BibliotecaIn, Libros),
+    modificarDisponibilidadLibro(Libros, IdLibro, true, NuevosLibros),
+    setBibliotecaLibros(BibliotecaIn, NuevosLibros, BibliotecaOut).
+
+% Quitar libro de la lista de libros de un usuario
+removerLibroDeUsuario(BibliotecaIn, IdUsuario, IdLibro, BibliotecaOut) :-
+    getBibliotecaUsuarios(BibliotecaIn, Usuarios),
+    modificarLibrosUsuario(Usuarios, IdUsuario, IdLibro, remover, NuevosUsuarios),
+    setBibliotecaUsuarios(BibliotecaIn, NuevosUsuarios, BibliotecaOut).
+
+% Verificar si usuario esta retrasado en la devolución de un libro
+tieneRetrasoExcesivo(Biblioteca, IdUsuario, FechaActual, DiasMaxRetraso) :-
+    getBibliotecaPrestamos(Biblioteca, Prestamos),
+    prestamosActivosUsuario(Prestamos, IdUsuario, PrestamosUsuario),
+    member(Prestamo, PrestamosUsuario),
+    obtenerFechaVencimiento(Prestamo, FechaVencimiento),
+    calcularDiasRetraso(FechaVencimiento, FechaActual, DiasRetraso),
+    DiasRetraso > DiasMaxRetraso, 
+    !.
+
+% Obtener prestamos activos de un usuario
+prestamosActivosUsuario([], _, []).
+prestamosActivosUsuario([Prestamo|Resto], IdUsuario, [Prestamo|PrestamosUsuario]) :-
+    getPrestamoIdUsuario(Prestamo, IdUsuario),
+    isPrestamoActivo(Prestamo), 
+    !,
+    prestamosActivosUsuario(Resto, IdUsuario, PrestamosUsuario).
+prestamosActivosUsuario([_|Resto], IdUsuario, PrestamosUsuario) :-
+    prestamosActivosUsuario(Resto, IdUsuario, PrestamosUsuario).
+
+% Modifica estado de suspendido de un usuario
+modificarSuspensionUsuario([Usuario|Resto], IdUsuario, NuevoEstado, [UsuarioModificado|Resto]) :-
+    getUsuarioId(Usuario, IdUsuario), 
+    !,
+    setUsuarioSuspendido(Usuario, NuevoEstado, UsuarioModificado).
+modificarSuspensionUsuario([Usuario|Resto], IdUsuario, NuevoEstado, [Usuario|NuevoResto]) :-
+    modificarSuspensionUsuario(Resto, IdUsuario, NuevoEstado, NuevoResto).
+
+% RF22: renovarPrestamo/5
+% Descripción: Renueva préstamo agregando días extra. Verifica: 1) préstamo existe y está activo, 2) usuario no suspendido, 3) no hay retraso actual, 4) días totales no exceden máximo. Si falla alguna verificación, retorna false.
+% Parametros: renovarPrestamo(+BibliotecaIn, +IdPrestamo, +DiasExtra, +FechaActual, -BibliotecaOut)
+% Algoritmo: fuerza bruta
+renovarPrestamo(BibliotecaIn, IdPrestamo, DiasExtra, FechaActual, BibliotecaOut) :-
+    % 1. Verificar que el prestamo exista y que este activo
+    getBibliotecaPrestamos(BibliotecaIn, Prestamos),
+    buscarPrestamoPorId(Prestamos, IdPrestamo, Prestamo),
+    isPrestamoActivo(Prestamo),
+    
+    % 2. Verificar que el usuario no este suspendido
+    getPrestamoIdUsuario(Prestamo, IdUsuario),
+    obtenerUsuario(BibliotecaIn, IdUsuario, Usuario),
+    Usuario \= false,
+    \+ isUsuarioSuspendido(Usuario),
+    
+    % 3. Verificar que la devolución del libro no este atrasada
+    obtenerFechaVencimiento(Prestamo, FechaVencimiento),
+    calcularDiasRetraso(FechaVencimiento, FechaActual, DiasRetraso),
+    DiasRetraso =:= 0,
+    
+    % 4. Verificar que los dias pedidos no superen el maximo permitido
+    getPrestamoDiasSolicitados(Prestamo, DiasActuales),
+    DiasTotal is DiasActuales + DiasExtra,
+    getBibliotecaDiasMax(BibliotecaIn, DiasMax),
+    DiasTotal =< DiasMax,
+    
+    % Si se validaron todas las verificaciones, extender el prestamo
+    actualizarDiasPrestamo(BibliotecaIn, IdPrestamo, DiasTotal, BibliotecaOut).
+
+% RF23: pagarDeuda/4
+% Descripción: Usuario paga monto para reducir deuda. Para reactivarse debe: pagar TODA la deuda (deuda=0) Y no tener libros con retraso excesivo. Si paga parcialmente, reduce deuda pero sigue suspendido.
+% Parametros: pagarDeuda(+BibliotecaIn, +IdUsuario, +Monto, -BibliotecaOut)
+% Algoritmo: fuerza bruta
+pagarDeuda(BibliotecaIn, IdUsuario, Monto, BibliotecaOut) :-
+    % Reducir la deuda del usuario
+    getBibliotecaUsuarios(BibliotecaIn, Usuarios),
+    pagarDeudaEnLista(Usuarios, IdUsuario, Monto, NuevosUsuarios),
+    setBibliotecaUsuarios(BibliotecaIn, NuevosUsuarios, BibliotecaTemp),
+    
+    % Verificar si el usuario puede reactivarse
+    obtenerUsuario(BibliotecaTemp, IdUsuario, UsuarioActualizado),
+    getUsuarioDeuda(UsuarioActualizado, DeudaFinal),
+    getFecha(BibliotecaTemp, FechaActual),
+    
+    getBibliotecaDiasRetraso(BibliotecaTemp, DiasMaxRetraso),
+    (DeudaFinal =:= 0, \+ tieneRetrasoExcesivo(BibliotecaTemp, IdUsuario, FechaActual, DiasMaxRetraso) ->
+        % Si la deuda es 0 y no tiene libros con retraso, reactivar al usuario
+        reactivarUsuario(BibliotecaTemp, IdUsuario, BibliotecaOut)
+    ;
+        % Si no, mantener suspendido
+        BibliotecaOut = BibliotecaTemp
+    ).
