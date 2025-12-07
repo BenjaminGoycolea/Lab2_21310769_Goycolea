@@ -9,6 +9,8 @@
     isPrestamoActivo/1,
     setPrestamoActivo/3,
     obtenerFechaVencimiento/2,
+    calcularDiasRetraso/3,
+    calcularMulta/4,
     extraerDatosFecha/3,
     formatearFecha/3
 ]).
@@ -129,3 +131,30 @@ formatearFecha(Dia, Mes, FechaFormateada) :-
     format(atom(MesAtom), '~|~`0t~d~2+', [Mes]),
     atom_concat(DiaAtom, '/', Temp),
     atom_concat(Temp, MesAtom, FechaFormateada).
+
+% RF16: calcularDiasRetraso/3
+% Descripción: Calcula días de retraso entre fecha de vencimiento y fecha actual. Retorna 0 si no hay retraso (fecha actual <= vencimiento).
+% Parametros: calcularDiasRetraso(+FechaVencimiento, +FechaActual, -DiasRetraso)
+% Algoritmo: fuerza bruta
+calcularDiasRetraso(FechaVencimiento, FechaActual, DiasRetraso) :-
+    fechaADias(FechaVencimiento, DiasVencimiento),
+    fechaADias(FechaActual, DiasActuales),
+    DiferenciaTemp is DiasActuales - DiasVencimiento,
+    (DiferenciaTemp =< 0 -> DiasRetraso = 0 ; DiasRetraso = DiferenciaTemp).
+
+% fechaADias/2
+% Descripción: Convierte una fecha "DD/MM" a número de días absolutos
+% Parametros: fechaADias(+Fecha, -Dias)
+% Algoritmo: fuerza bruta
+fechaADias(Fecha, Dias) :-
+    extraerDatosFecha(Fecha, Dia, Mes),
+    Dias is (Mes - 1) * 30 + Dia.
+
+% RF17: calcularMulta/4
+% Descripción: Calcula multa multiplicando días de retraso por tasa diaria. Si no hay retraso, multa es 0.
+% Parametros: calcularMulta(+Prestamo, +FechaActual, +TasaMultaDiaria, -Multa)
+% Algoritmo: fuerza bruta
+calcularMulta(Prestamo, FechaActual, TasaMultaDiaria, Multa) :-
+    obtenerFechaVencimiento(Prestamo, FechaVencimiento),
+    calcularDiasRetraso(FechaVencimiento, FechaActual, DiasRetraso),
+    Multa is DiasRetraso * TasaMultaDiaria.
