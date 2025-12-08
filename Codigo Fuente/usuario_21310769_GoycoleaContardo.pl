@@ -74,3 +74,19 @@ agregarLibroUsuario([Id, Nombre, Deuda, Libros, Suspendido], IdLibro, [Id, Nombr
 removerLibroUsuario([Id, Nombre, Deuda, Libros, Suspendido], IdLibro, [Id, Nombre, Deuda, NuevosLibros, Suspendido]) :-
     integer(IdLibro),
     delete(Libros, IdLibro, NuevosLibros).
+
+%=============== Otros ===================
+
+% contarLibrosUsuario/2
+% Descripción: Cuenta numero de libros prestados al usuario
+% Parametros: contarLibrosUsuario(+Usuario, -Cantidad)
+% Algoritmo: fuerza bruta
+contarLibrosUsuario([_, _, _, Libros, _], Cantidad) :-
+    length(Libros, Cantidad).
+
+% tieneLibroUsuario/2
+% Descripción: Verifica si el usuario tiene prestado un libro específico
+% Parametros: tieneLibroUsuario(+Usuario, -IdLibro)
+% Algoritmo: fuerza bruta
+tieneLibroUsuario([_, _, _, Libros, _], IdLibro) :-
+    member(IdLibro, Libros).
