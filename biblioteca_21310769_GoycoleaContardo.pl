@@ -300,12 +300,6 @@ modificarLibrosUsuario([Usuario|Resto], IdUsuario, IdLibro, Operacion, [UsuarioM
     ).
 modificarLibrosUsuario([Usuario|Resto], IdUsuario, IdLibro, Operacion, [Usuario|NuevoResto]) :-
     modificarLibrosUsuario(Resto, IdUsuario, IdLibro, Operacion, NuevoResto).
-        % Si el dia actual no es 30
-        % Es el mismo mes, pasar al dia siguiente
-        NuevoDia is Dia + 1,
-        NuevoMes = Mes
-    ),
-    formatearFecha(NuevoDia, NuevoMes, FechaSiguiente).
 
 % RF19: devolverLibro/5
 % Descripción: Devuelve un libro y procesa multas. Calcula multa por retraso, suma la deuda del usuario, marca el libro disponible. Si la deuda total excede el límite, se suspende al usuario automáticamente. Usuario suspendido SÍ puede devolver.
@@ -505,3 +499,162 @@ pagarDeuda(BibliotecaIn, IdUsuario, Monto, BibliotecaOut) :-
         % Si no, mantener suspendido
         BibliotecaOut = BibliotecaTemp
     ).
+
+
+% Busca un préstamo por ID
+buscarPrestamoPorId([Prestamo|_], IdPrestamo, Prestamo) :-
+    getPrestamoId(Prestamo, IdPrestamo), 
+    !.
+buscarPrestamoPorId([_|Resto], IdPrestamo, Prestamo) :-
+    buscarPrestamoPorId(Resto, IdPrestamo, Prestamo).
+
+% Actualizar los dias de un prestamo
+actualizarDiasPrestamo(BibliotecaIn, IdPrestamo, NuevosDias, BibliotecaOut) :-
+    getBibliotecaPrestamos(BibliotecaIn, Prestamos),
+    actualizarDiasEnLista(Prestamos, IdPrestamo, NuevosDias, NuevosPrestamos),
+    setBibliotecaPrestamos(BibliotecaIn, NuevosPrestamos, BibliotecaOut).
+
+% Actualizar dias de un prestamo en lista de prestamos
+actualizarDiasEnLista([Prestamo|Resto], IdPrestamo, NuevosDias, [PrestamoModificado|Resto]) :-
+    getPrestamoId(Prestamo, IdPrestamo), !,
+    getPrestamoIdUsuario(Prestamo, IdUsuario),
+    getPrestamoIdLibro(Prestamo, IdLibro),
+    getPrestamoFechaPrestamo(Prestamo, FechaPrestamo),
+    isPrestamoActivo(Prestamo),
+    PrestamoModificado = [IdPrestamo, IdUsuario, IdLibro, FechaPrestamo, NuevosDias, true].
+actualizarDiasEnLista([Prestamo|Resto], IdPrestamo, NuevosDias, [Prestamo|NuevoResto]) :-
+    actualizarDiasEnLista(Resto, IdPrestamo, NuevosDias, NuevoResto).
+
+% Reducir deuda de un usuario
+pagarDeudaEnLista([Usuario|Resto], IdUsuario, Monto, [UsuarioModificado|Resto]) :-
+    getUsuarioId(Usuario, IdUsuario), !,
+    getUsuarioDeuda(Usuario, DeudaActual),
+    (DeudaActual >= Monto ->
+        % Si la deuda es mayor al monto que se paga, simplemente restar
+        NuevaDeuda is DeudaActual - Monto
+    ;
+    % Si no, dejar deuda en cero (no se puede tener deuda negativa)
+        NuevaDeuda = 0
+    ),
+    setUsuarioDeuda(Usuario, NuevaDeuda, UsuarioModificado).
+pagarDeudaEnLista([Usuario|Resto], IdUsuario, Monto, [Usuario|NuevoResto]) :-
+    pagarDeudaEnLista(Resto, IdUsuario, Monto, NuevoResto).
+
+% Reactivar usuario (Quitar suspensión)
+reactivarUsuario(BibliotecaIn, IdUsuario, BibliotecaOut) :-
+    getBibliotecaUsuarios(BibliotecaIn, Usuarios),
+    modificarSuspensionUsuario(Usuarios, IdUsuario, false, NuevosUsuarios),
+    setBibliotecaUsuarios(BibliotecaIn, NuevosUsuarios, BibliotecaOut).
+
+% RF24: historialPrestamosUsuario/3
+% Descripción: Obtiene préstamos de un usuario formateados como string. Retorna string vacío si usuario no existe o sin préstamos. Muestra: ID préstamo, ID libro, fecha préstamo, vencimiento, estado.
+% Parametros: historialPrestamosUsuario(+BibliotecaIn, +IdUsuario, -Str)
+% Algoritmo: fuerza bruta
+
+% Si el usuario existe
+historialPrestamosUsuario(Biblioteca, IdUsuario, Str) :-
+    % Verificar que el usuario exista
+    obtenerUsuario(Biblioteca, IdUsuario, Usuario),
+    Usuario \= false, !,
+    
+    % Obtener prestamos del usuario
+    getBibliotecaPrestamos(Biblioteca, Prestamos),
+    prestamosDeUsuario(Prestamos, IdUsuario, PrestamosUsuario),
+    
+    % Formatear historial
+    (PrestamosUsuario = [] ->
+        Str = ""
+    ;
+        format(atom(Header), 'Historial Usuario ~w:~n', [IdUsuario]),
+        formatearPrestamosUsuario(PrestamosUsuario, LineasPrestamos),
+        atomic_list_concat(LineasPrestamos, '', LineasStr),
+        atom_concat(Header, LineasStr, Str)
+    ).
+% Usuario no existe
+historialPrestamosUsuario(_, _, "") :- 
+    !.
+
+% RF25: historialPrestamosSistema/2
+% Descripción: Obtiene todos los préstamos formateados como string legible. Debe mostrar: ID préstamo, ID usuario, ID libro, fecha préstamo, días solicitados, estado (activo/completado). No debe mostrar por pantalla, el resultado debe quedar en el segundo argumento de este predicado.
+% Parametros: historialPrestamosSistema(+BibliotecaIn, -Str)
+% Algoritmo: fuerza bruta
+historialPrestamosSistema(Biblioteca, Str) :-
+    getBibliotecaPrestamos(Biblioteca, Prestamos),
+    (Prestamos = [] ->
+        Str = ""
+    ;
+        formatearPrestamosSistema(Prestamos, LineasPrestamos),
+        atomic_list_concat(LineasPrestamos, '', Str)
+    ).
+
+% RF26: procesarDia/2
+% Descripción: Simula que pasa un día. Fecha actual + 1 día. Si día=30 pasa a 01 del mes siguiente. No considera años ni casos especiales. Actualiza fecha interna del sistema y ejecuta todos los procesos internos de la biblioteca que actualizan la multa, verifican si el usuario debe estar suspendido y suspender al usuario.
+% Parametros: procesarDia(+BibliotecaIn, -BibliotecaOut)
+% Algoritmo: fuerza bruta
+procesarDia(BibliotecaIn, BibliotecaOut) :-
+    % Avanzar fecha
+    getFecha(BibliotecaIn, FechaActual),
+    avanzarFecha(FechaActual, NuevaFecha),
+    setBibliotecaFecha(BibliotecaIn, NuevaFecha, BibliotecaTemp),
+    
+    % Procesar cada usuario activo (verificar suspensiones)
+    getBibliotecaUsuarios(BibliotecaTemp, Usuarios),
+    procesarUsuarios(BibliotecaTemp, Usuarios, NuevaFecha, BibliotecaOut).
+
+% Obtener prestamos de un usuario
+prestamosDeUsuario([], _, []).
+prestamosDeUsuario([Prestamo|Resto], IdUsuario, [Prestamo|PrestamosUsuario]) :-
+    getPrestamoIdUsuario(Prestamo, IdUsuario), !,
+    prestamosDeUsuario(Resto, IdUsuario, PrestamosUsuario).
+prestamosDeUsuario([_|Resto], IdUsuario, PrestamosUsuario) :-
+    prestamosDeUsuario(Resto, IdUsuario, PrestamosUsuario).
+
+% Formatear prestamos para el historial de un usuario
+formatearPrestamosUsuario([], []).
+formatearPrestamosUsuario([Prestamo|Resto], [Linea|LineasResto]) :-
+    getPrestamoId(Prestamo, IdPrestamo),
+    getPrestamoIdLibro(Prestamo, IdLibro),
+    getPrestamoFechaPrestamo(Prestamo, FechaPrestamo),
+    obtenerFechaVencimiento(Prestamo, FechaVencimiento),
+    (isPrestamoActivo(Prestamo) -> Estado = 'Activo' ; Estado = 'Completado'),
+    format(atom(Linea), 'Préstamo #~w - Libro ~w - Prestado: ~w - Vence: ~w - ~w~n',
+           [IdPrestamo, IdLibro, FechaPrestamo, FechaVencimiento, Estado]),
+    formatearPrestamosUsuario(Resto, LineasResto).
+
+% Formatear prestamos para el historial de la biblioteca
+formatearPrestamosSistema([], []).
+formatearPrestamosSistema([Prestamo|Resto], [Linea|LineasResto]) :-
+    getPrestamoId(Prestamo, IdPrestamo),
+    getPrestamoIdUsuario(Prestamo, IdUsuario),
+    getPrestamoIdLibro(Prestamo, IdLibro),
+    getPrestamoFechaPrestamo(Prestamo, FechaPrestamo),
+    getPrestamoDiasSolicitados(Prestamo, Dias),
+    (isPrestamoActivo(Prestamo) -> Estado = 'ACTIVO' ; Estado = 'COMPLETADO'),
+    format(atom(Linea), 'Préstamo #~w: Usuario ~w - Libro ~w - Fecha: ~w - Días: ~w - ~w~n',
+           [IdPrestamo, IdUsuario, IdLibro, FechaPrestamo, Dias, Estado]),
+    formatearPrestamosSistema(Resto, LineasResto).
+
+% Procesar a todos los usuarios para ver si deben suspenderse al pasar el dia por no devolver libro
+procesarUsuarios(Biblioteca, [], _, Biblioteca).
+procesarUsuarios(BibliotecaIn, [Usuario|Resto], FechaActual, BibliotecaOut) :-
+    getUsuarioId(Usuario, IdUsuario),
+    
+    % Verificar si se debe suspender
+    (debeSuspenderse(BibliotecaIn, IdUsuario, FechaActual) ->
+        % Si se debe suspender suspenderlo
+        suspenderUsuario(BibliotecaIn, IdUsuario, BibliotecaTemp)
+    ;
+        % Si no, dejar biblioteca tal cual
+        BibliotecaTemp = BibliotecaIn
+    ),
+    
+    procesarUsuarios(BibliotecaTemp, Resto, FechaActual, BibliotecaOut).
+
+% Formatear fecha para script base
+fecha(_, Dia, Mes, FechaStr) :-
+    atom_concat('', Dia, DiaAtom),
+    atom_concat('', Mes, MesAtom),
+    (Dia < 10 -> atom_concat('0', DiaAtom, DiaFormateado) ; DiaFormateado = DiaAtom),
+    (Mes < 10 -> atom_concat('0', MesAtom, MesFormateado) ; MesFormateado = MesAtom),
+    atom_concat(DiaFormateado, '/', TempStr),
+    atom_concat(TempStr, MesFormateado, FechaStr).
